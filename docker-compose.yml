@@ -3,9 +3,9 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: docintel
-      POSTGRES_PASSWORD: docintel_dev   # dev only; real secrets Day 10
+      POSTGRES_PASSWORD: docintel_dev
       POSTGRES_DB: docintel
-    ports: ["5432:5432"]
+    ports: ["5433:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U docintel"]
