@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "docintel"
     environment: str = "development"
 
-    database_url: str = "postgresql+psycopg://docintel:docintel_dev@localhost:5433/docintel"
+    database_url: str = "postgresql+psycopg://docintel:docintel_dev@localhost:5432/docintel"
     redis_url: str = "redis://localhost:6379/0"
 
     storage_backend: str = "local"          # "local" | "s3"
