@@ -7,6 +7,7 @@ from app.api.v1.documents import router as documents_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import engine
+from app.models.extraction import Extraction  
 from app.models.document import Base
 
 

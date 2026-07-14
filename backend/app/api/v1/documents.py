@@ -22,7 +22,7 @@ def get_ingestion_service() -> IngestionService:
     return IngestionService(storage=get_storage(settings), max_bytes=settings.max_upload_bytes)
 
 
-@router.post("/documents", status_code=201)
+@router.post("/documents", status_code=202)
 async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -51,5 +51,9 @@ async def upload_document(
     db.add(doc)
     db.commit()
     log.info("document.ingested", document_id=str(doc.id), content_type=doc.content_type, size=doc.size_bytes)
-    # TODO(Day 3): enqueue Celery processing task here, return immediately.
+
+    # Enqueue async processing; return immediately (do NOT block on the 6s+ LLM call).
+    from app.workers.pipeline import process_document
+    process_document.delay(str(doc.id))
+
     return {"document_id": str(doc.id), "status": doc.status.value}
