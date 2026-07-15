@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     storage_backend: str = "local"          # "local" | "s3"
     storage_local_path: str = "./storage"
 
+    confidence_strategy: str = "min_gated"
+    confidence_threshold: float = 0.70   # below this → review (Engine 4, Day 8)
+
     max_upload_bytes: int = 25 * 1024 * 1024  # 25 MB
 
     ollama_base_url: str = "http://localhost:11434"

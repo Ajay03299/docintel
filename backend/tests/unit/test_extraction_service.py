@@ -63,3 +63,15 @@ def test_images_go_straight_to_ocr():
     assert out.method == ExtractionMethod.OCR
     assert native.called is False   # no text layer on an image; don't waste the call
     assert "image" in out.ocr_fallback_reason
+
+def test_normalize_text_collapses_column_padding():
+    """PDF text layers pad columns with runs of spaces; ~80% of a real invoice's
+    extracted chars were padding, which measurably degraded LLM extraction."""
+    from app.engines.understanding.extraction import normalize_text
+
+    raw = "ACME SUPPLIES LTD" + " " * 60 + "\n" + " " * 80 + "\nTotal: 118.00" + " " * 40
+    out = normalize_text(raw)
+
+    assert out == "ACME SUPPLIES LTD\nTotal: 118.00"
+    assert len(out) < len(raw) / 4          # padding dominated the raw text
+    assert "ACME SUPPLIES LTD" in out       # content preserved

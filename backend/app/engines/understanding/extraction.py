@@ -146,3 +146,14 @@ class ExtractionService:
             return False
         avg = result.total_chars / result.page_count
         return avg >= self._min_chars_per_page
+
+
+def normalize_text(text: str) -> str:
+    """Collapse layout padding before sending text to an LLM.
+
+    PDF text layers are often column-padded with runs of spaces, which is pure
+    noise to a language model and wastes context. Deterministic cleanup is far
+    cheaper and more reliable than asking the model to look past it.
+    """
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)

@@ -11,6 +11,7 @@ from app.engines.ingestion.service import (
 )
 from app.engines.ingestion.storage import get_storage
 from app.models.document import Document, DocumentStatus
+from app.models.extraction import Extraction
 from app.schemas.envelope import SourceChannel
 
 log = structlog.get_logger()
@@ -57,3 +58,23 @@ async def upload_document(
     process_document.delay(str(doc.id))
 
     return {"document_id": str(doc.id), "status": doc.status.value}
+
+@router.get("/documents/{document_id}")
+def get_document(document_id: str, db: Session = Depends(get_db)):
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    ext = db.query(Extraction).filter_by(document_id=doc.id).one_or_none()
+    return {
+        "document_id": str(doc.id),
+        "status": doc.status.value,
+        "filename": doc.original_filename,
+        "extraction": None if ext is None else {
+            "method": ext.extraction_method,
+            "model": ext.model,
+            "data": ext.data,
+            "overall_confidence": ext.overall_confidence,
+            "confidence": ext.confidence,
+            "parse_error": ext.parse_error,
+        },
+    }

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Float
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.document import Base
@@ -23,4 +24,6 @@ class Extraction(Base):
     model: Mapped[str] = mapped_column(String(64))
     data: Mapped[dict] = mapped_column(JSONB, default=dict)          # the structured invoice JSON
     parse_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    overall_confidence: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    confidence: Mapped[dict] = mapped_column(JSONB, default=dict)   # full ConfidenceReport
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
