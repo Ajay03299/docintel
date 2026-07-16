@@ -1,0 +1,79 @@
+# Invoice validation configuration.
+# Thresholds, severities and enablement live here — tuning business policy
+# never requires a code change or redeploy of rule logic.
+rules:
+  mandatory_fields:
+    enabled: true
+    params:
+      required: [invoice_number, invoice_date, vendor_name, total]
+
+  invoice_number_format:
+    enabled: true
+    params:
+      min_length: 3
+      max_length: 40
+
+  currency_valid:
+    enabled: true
+    params:
+      allowed: [USD, EUR, GBP, INR, AUD, CAD, SGD, JPY]
+
+  vendor_tax_id_format:
+    enabled: true
+
+  invoice_total_arithmetic:
+    enabled: true
+    params:
+      tolerance: 0.01
+
+  subtotal_matches_line_items:
+    enabled: true
+    params:
+      tolerance: 0.01
+
+  line_item_amount_consistency:
+    enabled: true
+    params:
+      tolerance: 0.01
+
+  tax_percentage_plausible:
+    enabled: true
+    params:
+      max_percent: 30.0
+      known_rates: [0, 5, 8, 12, 18, 20, 28]
+      rate_tolerance: 0.6
+
+  negative_quantity:
+    enabled: true
+    params:
+      allow_zero: false
+
+  negative_amount:
+    enabled: true
+
+  zero_total:
+    enabled: true
+
+  date_format_valid:
+    enabled: true
+
+  future_date:
+    enabled: true
+    params:
+      grace_days: 1
+
+  stale_date:
+    enabled: true
+    params:
+      max_age_days: 365
+
+  duplicate_invoice:
+    enabled: true
+
+  duplicate_line_items:
+    enabled: true
+
+  vendor_known:
+    enabled: true
+    # Downgraded: an unknown vendor should not block a valid invoice outright.
+    severity: warning

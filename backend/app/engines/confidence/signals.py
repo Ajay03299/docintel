@@ -1,11 +1,11 @@
 import re
-from datetime import datetime
 from typing import Any, Callable
+
+from app.core.dates import parse_date
 
 from app.schemas.confidence import FieldScore
 
 _ISO_CURRENCY = re.compile(r"^[A-Z]{3}$")
-_DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y")
 
 
 def is_present(value: Any) -> bool:
@@ -35,15 +35,8 @@ def is_grounded(value: Any, source_text: str | None) -> bool:
 
 
 def parses_as_date(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    for fmt in _DATE_FORMATS:
-        try:
-            datetime.strptime(value.strip(), fmt)
-            return True
-        except ValueError:
-            continue
-    return False
+    """Delegates to the shared parser so confidence and validation never drift."""
+    return parse_date(value) is not None
 
 
 def is_iso_currency(value: Any) -> bool:

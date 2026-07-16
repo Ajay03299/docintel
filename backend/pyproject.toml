@@ -17,6 +17,7 @@ dependencies = [
     "pymupdf>=1.28.0",
     "pytesseract>=0.3.13",
     "python-multipart>=0.0.32",
+    "pyyaml>=6.0.3",
     "redis>=8.0.1",
     "sqlalchemy>=2.0.51",
     "structlog>=26.1.0",
