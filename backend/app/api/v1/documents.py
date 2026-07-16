@@ -12,6 +12,7 @@ from app.engines.ingestion.service import (
 from app.engines.ingestion.storage import get_storage
 from app.models.document import Document, DocumentStatus
 from app.models.extraction import Extraction
+from app.models.validation import Validation
 from app.schemas.envelope import SourceChannel
 
 log = structlog.get_logger()
@@ -65,6 +66,7 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
     if doc is None:
         raise HTTPException(404, "Document not found")
     ext = db.query(Extraction).filter_by(document_id=doc.id).one_or_none()
+    val = db.query(Validation).filter_by(document_id=doc.id).one_or_none()
     return {
         "document_id": str(doc.id),
         "status": doc.status.value,
@@ -76,5 +78,9 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
             "overall_confidence": ext.overall_confidence,
             "confidence": ext.confidence,
             "parse_error": ext.parse_error,
+        },
+        "validation": None if val is None else {
+            "overall": val.overall,
+            "report": val.report,
         },
     }

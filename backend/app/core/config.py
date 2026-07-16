@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     confidence_strategy: str = "min_gated"
     confidence_threshold: float = 0.70   # below this → review (Engine 4, Day 8)
+    vendor_directory_path: str = "app/plugins/invoice/vendors.txt"
 
     max_upload_bytes: int = 25 * 1024 * 1024  # 25 MB
 

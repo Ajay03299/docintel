@@ -5,6 +5,10 @@ from app.core.config import get_settings
 from app.db.session import session_scope
 from app.engines.confidence.service import ConfidenceService
 from app.engines.ingestion.storage import get_storage
+from app.engines.validation.adapters import SqlDuplicateLookup, load_vendor_directory
+from app.engines.validation.base import ValidationContext
+from app.engines.validation.config import invoice_rule_config
+from app.engines.validation.service import ValidationService
 from app.engines.understanding.extraction import (
     ExtractionService,
     NativeExtractor,
@@ -15,6 +19,7 @@ from app.engines.understanding.providers.ollama import OllamaProvider
 from app.engines.understanding.structured_extraction import StructuredExtractor
 from app.models.document import Document, DocumentStatus
 from app.models.extraction import Extraction
+from app.models.validation import Validation
 from app.plugins.invoice.confidence import (
     CRITICAL_FIELDS,
     FIELD_WEIGHTS,
@@ -100,7 +105,6 @@ def process_document(self, document_id: str) -> dict:
             existing.overall_confidence = report.overall
             existing.confidence = report.model_dump()
 
-            doc.status = DocumentStatus.EXTRACTED
             log.info(
                 "pipeline.extracted",
                 document_id=document_id,
@@ -109,9 +113,36 @@ def process_document(self, document_id: str) -> dict:
                 confidence=report.overall,
                 strategy=report.strategy,
             )
+
+            # --- Stage 4: validation (business correctness, not extraction trust) ---
+            val_ctx = ValidationContext(
+                data=structured.data,
+                source_text=clean_text,
+                document_id=str(doc.id),
+                duplicate_lookup=SqlDuplicateLookup(db),
+                vendor_directory=load_vendor_directory(settings.vendor_directory_path),
+            )
+            val_report = ValidationService(invoice_rule_config()).validate(val_ctx)
+
+            existing_val = db.query(Validation).filter_by(document_id=doc.id).one_or_none()
+            if existing_val is None:
+                existing_val = Validation(document_id=doc.id)
+                db.add(existing_val)
+            existing_val.overall = val_report.overall.value
+            existing_val.report = val_report.model_dump(mode="json")
+
+            doc.status = DocumentStatus.VALIDATED
+            log.info(
+                "pipeline.validated",
+                document_id=document_id,
+                validation=val_report.overall.value,
+                counts=val_report.counts,
+                failures=[r.rule_id for r in val_report.failures],
+            )
             return {
-                "status": "extracted",
+                "status": doc.status.value,
                 "confidence": report.overall,
+                "validation": val_report.overall.value,
                 "parse_error": structured.parse_error,
             }
 
