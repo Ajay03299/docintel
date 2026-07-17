@@ -9,6 +9,7 @@ def _num(value: object) -> float | None:
 
 @register_rule
 class InvoiceTotalArithmeticRule(ValidationRule):
+    retryable = True
     rule_id = "invoice_total_arithmetic"
     description = "subtotal + tax - discount must equal total."
 
@@ -44,6 +45,7 @@ class InvoiceTotalArithmeticRule(ValidationRule):
 
 @register_rule
 class SubtotalMatchesLineItemsRule(ValidationRule):
+    retryable = True
     rule_id = "subtotal_matches_line_items"
     description = "Sum of line item amounts must equal the stated subtotal."
 
@@ -82,6 +84,7 @@ class SubtotalMatchesLineItemsRule(ValidationRule):
 
 @register_rule
 class LineItemAmountConsistencyRule(ValidationRule):
+    retryable = True
     rule_id = "line_item_amount_consistency"
     description = "Each line item's quantity x unit_price must equal its amount."
 
@@ -121,6 +124,7 @@ class LineItemAmountConsistencyRule(ValidationRule):
 
 @register_rule
 class TaxPercentageRule(ValidationRule):
+    retryable = True
     rule_id = "tax_percentage_plausible"
     description = "Implied tax rate (tax/subtotal) must fall in a plausible band."
 

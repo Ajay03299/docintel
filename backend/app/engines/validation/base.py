@@ -52,6 +52,12 @@ class ValidationRule(ABC):
     rule_id: str = ""
     description: str = ""
 
+    # Can a better extraction of THIS SAME document plausibly make this pass?
+    # False = the failure is a fact about the document or about other documents
+    # (future date, duplicate, unknown vendor) — re-running the model is waste.
+    # Default False: a new rule must opt IN to costing us a retry.
+    retryable: bool = False
+
     @abstractmethod
     def evaluate(self, ctx: ValidationContext) -> ValidationResult: ...
 

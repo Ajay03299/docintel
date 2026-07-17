@@ -13,6 +13,7 @@ from app.engines.ingestion.storage import get_storage
 from app.models.document import Document, DocumentStatus
 from app.models.extraction import Extraction
 from app.models.validation import Validation
+from app.models.review import Review
 from app.schemas.envelope import SourceChannel
 
 log = structlog.get_logger()
@@ -67,6 +68,7 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Document not found")
     ext = db.query(Extraction).filter_by(document_id=doc.id).one_or_none()
     val = db.query(Validation).filter_by(document_id=doc.id).one_or_none()
+    rev = db.query(Review).filter_by(document_id=doc.id).one_or_none()
     return {
         "document_id": str(doc.id),
         "status": doc.status.value,
@@ -82,5 +84,13 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
         "validation": None if val is None else {
             "overall": val.overall,
             "report": val.report,
+        },
+        "review": None if rev is None else {
+            "decision": rev.decision,
+            "reasoning": rev.reasoning,
+            "attempts": rev.attempts,
+            "overridden": rev.overridden,
+            "override_reason": rev.override_reason,
+            "history": rev.history,
         },
     }

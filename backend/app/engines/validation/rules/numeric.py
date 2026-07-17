@@ -9,6 +9,7 @@ def _num(value: object) -> float | None:
 
 @register_rule
 class NegativeQuantityRule(ValidationRule):
+    retryable = True
     rule_id = "negative_quantity"
     description = "Line item quantities must not be negative or zero."
 
@@ -38,6 +39,7 @@ class NegativeQuantityRule(ValidationRule):
 
 @register_rule
 class NegativeAmountRule(ValidationRule):
+    retryable = True
     rule_id = "negative_amount"
     description = "Monetary totals must not be negative."
 

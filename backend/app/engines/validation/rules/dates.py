@@ -13,6 +13,7 @@ def _now(ctx: ValidationContext) -> datetime:
 
 @register_rule
 class DateFormatRule(ValidationRule):
+    retryable = True
     rule_id = "date_format_valid"
     description = "Invoice date must parse as a real calendar date."
 

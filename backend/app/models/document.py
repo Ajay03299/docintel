@@ -20,6 +20,7 @@ class DocumentStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     ESCALATED = "escalated"
+    REJECTED = "rejected"
 
 
 def _utcnow() -> datetime:

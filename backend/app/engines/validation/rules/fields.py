@@ -22,6 +22,7 @@ def _missing(data: dict, keys: list[str]) -> list[str]:
 
 @register_rule
 class MandatoryFieldsRule(ValidationRule):
+    retryable = True
     rule_id = "mandatory_fields"
     description = "Required invoice fields must be present and non-empty."
 
@@ -42,6 +43,7 @@ class MandatoryFieldsRule(ValidationRule):
 
 @register_rule
 class InvoiceNumberFormatRule(ValidationRule):
+    retryable = True
     rule_id = "invoice_number_format"
     description = "Invoice number must look like an identifier, not prose."
 
@@ -71,6 +73,7 @@ class InvoiceNumberFormatRule(ValidationRule):
 
 @register_rule
 class CurrencyValidRule(ValidationRule):
+    retryable = True
     rule_id = "currency_valid"
     description = "Currency must be a 3-letter ISO 4217 code from the allowed list."
 
@@ -101,6 +104,7 @@ class CurrencyValidRule(ValidationRule):
 
 @register_rule
 class VendorTaxIdFormatRule(ValidationRule):
+    retryable = True
     rule_id = "vendor_tax_id_format"
     description = "Vendor tax ID (GSTIN/VAT/EIN) must match a known format."
 

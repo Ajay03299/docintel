@@ -1,24 +1,31 @@
 import structlog
 from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.db.session import session_scope
 from app.engines.confidence.service import ConfidenceService
 from app.engines.ingestion.storage import get_storage
-from app.engines.validation.adapters import SqlDuplicateLookup, load_vendor_directory
-from app.engines.validation.base import ValidationContext
-from app.engines.validation.config import invoice_rule_config
-from app.engines.validation.service import ValidationService
+from app.engines.review.agent import ReviewAgent
 from app.engines.understanding.extraction import (
     ExtractionService,
     NativeExtractor,
     OcrExtractor,
     normalize_text,
 )
+from app.engines.understanding.providers.base import LLMProvider
 from app.engines.understanding.providers.ollama import OllamaProvider
-from app.engines.understanding.structured_extraction import StructuredExtractor
+from app.engines.understanding.structured_extraction import (
+    StructuredExtractionResult,
+    StructuredExtractor,
+)
+from app.engines.validation.adapters import SqlDuplicateLookup, load_vendor_directory
+from app.engines.validation.base import ValidationContext
+from app.engines.validation.config import invoice_rule_config
+from app.engines.validation.service import ValidationService
 from app.models.document import Document, DocumentStatus
 from app.models.extraction import Extraction
+from app.models.review import Review
 from app.models.validation import Validation
 from app.plugins.invoice.confidence import (
     CRITICAL_FIELDS,
@@ -27,9 +34,106 @@ from app.plugins.invoice.confidence import (
 )
 from app.plugins.invoice.prompt import INVOICE_SYSTEM_PROMPT, build_invoice_prompt
 from app.plugins.invoice.schema import InvoiceData
+from app.schemas.review import ReviewDecision
+from app.schemas.validation import Severity, ValidationReport
 from app.workers.celery_app import celery_app
 
 log = structlog.get_logger()
+
+
+class InvoiceReprocessor:
+    """Re-runs extraction -> confidence -> validation with the agent's hint.
+
+    This is what makes RETRY a real decision rather than dead code: the agent's
+    retry_hint is appended to the extraction prompt, so attempt 2 has guidance
+    attempt 1 lacked ("the vendor is the company at the top, not 'Bill To'").
+
+    Keeps the latest result so the caller can persist an improved extraction.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider: LLMProvider,
+        clean_text: str,
+        db: Session,
+        document_id: str,
+        settings: Settings,
+    ) -> None:
+        self._provider = provider
+        self._clean_text = clean_text
+        self._db = db
+        self._document_id = document_id
+        self._settings = settings
+        self.latest: tuple[StructuredExtractionResult, dict, ValidationReport] | None = None
+
+    def run(self, hint: str | None = None) -> tuple[StructuredExtractionResult, dict, ValidationReport]:
+        prompt = build_invoice_prompt(self._clean_text)
+        if hint:
+            prompt += (
+                "\n=== REVIEW GUIDANCE (a previous attempt was incomplete) ===\n"
+                f"{hint}\n"
+            )
+
+        structured = StructuredExtractor(self._provider, max_retries=1).extract(
+            document_text=self._clean_text,
+            system_prompt=INVOICE_SYSTEM_PROMPT,
+            user_prompt=prompt,
+            schema_model=InvoiceData,
+        )
+
+        report = ConfidenceService(self._settings.confidence_strategy).build_report(
+            scores=build_field_scores(structured.data, self._clean_text),
+            weights=FIELD_WEIGHTS,
+            critical=CRITICAL_FIELDS,
+        )
+
+        val_report = ValidationService(invoice_rule_config()).validate(
+            ValidationContext(
+                data=structured.data,
+                source_text=self._clean_text,
+                document_id=self._document_id,
+                duplicate_lookup=SqlDuplicateLookup(self._db),
+                vendor_directory=load_vendor_directory(self._settings.vendor_directory_path),
+            )
+        )
+
+        self.latest = (structured, report.model_dump(mode="json"), val_report)
+        return structured, report.model_dump(mode="json"), val_report
+
+    def reprocess(self, *, hint: str | None) -> tuple[dict, dict, ValidationReport]:
+        """The Reprocessor port the ReviewAgent depends on."""
+        structured, confidence, val_report = self.run(hint)
+        return structured.data, confidence, val_report
+
+
+def _persist_extraction(
+    db: Session,
+    doc: Document,
+    *,
+    method: str,
+    structured: StructuredExtractionResult,
+    confidence: dict,
+) -> None:
+    row = db.query(Extraction).filter_by(document_id=doc.id).one_or_none()
+    if row is None:
+        row = Extraction(document_id=doc.id)
+        db.add(row)
+    row.extraction_method = method
+    row.model = structured.model
+    row.data = structured.data
+    row.parse_error = structured.parse_error
+    row.overall_confidence = confidence["overall"]
+    row.confidence = confidence
+
+
+def _persist_validation(db: Session, doc: Document, val_report: ValidationReport) -> None:
+    row = db.query(Validation).filter_by(document_id=doc.id).one_or_none()
+    if row is None:
+        row = Validation(document_id=doc.id)
+        db.add(row)
+    row.overall = val_report.overall.value
+    row.report = val_report.model_dump(mode="json")
 
 
 @celery_app.task(
@@ -52,86 +156,53 @@ def process_document(self, document_id: str) -> dict:
                 log.error("pipeline.doc_missing", document_id=document_id)
                 return {"status": "missing"}
 
-            # Idempotency/resume guard: if already past extraction, don't redo it.
+            # Idempotency/resume guard: if already terminal, don't redo the work.
             if doc.status in (
-                DocumentStatus.EXTRACTED,
-                DocumentStatus.VALIDATED,
                 DocumentStatus.COMPLETED,
+                DocumentStatus.ESCALATED,
+                DocumentStatus.REJECTED,
             ):
-                log.info(
-                    "pipeline.already_done",
-                    document_id=document_id,
-                    status=doc.status.value,
-                )
+                log.info("pipeline.already_done", document_id=document_id, status=doc.status.value)
                 return {"status": doc.status.value}
 
             doc.status = DocumentStatus.PROCESSING
             db.flush()
 
-            storage = get_storage(settings)
-            data = storage.load(doc.storage_key)
+            data = get_storage(settings).load(doc.storage_key)
 
             # --- Stage 1: text extraction (native/OCR decision) ---
-            ext_svc = ExtractionService(NativeExtractor(), OcrExtractor())
-            text_result = ext_svc.extract(data, doc.content_type)
+            text_result = ExtractionService(NativeExtractor(), OcrExtractor()).extract(
+                data, doc.content_type
+            )
             # Strip PDF column padding before the LLM sees it: deterministic
             # cleanup removes noise far more cheaply than prompting around it.
             clean_text = normalize_text(text_result.full_text)
 
-            # --- Stage 2: structured LLM extraction ---
             provider = OllamaProvider(settings.ollama_base_url, settings.ollama_model)
-            structured = StructuredExtractor(provider, max_retries=1).extract(
-                document_text=clean_text,
-                system_prompt=INVOICE_SYSTEM_PROMPT,
-                user_prompt=build_invoice_prompt(clean_text),
-                schema_model=InvoiceData,
+            reprocessor = InvoiceReprocessor(
+                provider=provider,
+                clean_text=clean_text,
+                db=db,
+                document_id=str(doc.id),
+                settings=settings,
             )
 
-            # --- Stage 3: confidence scoring (deterministic verification) ---
-            scores = build_field_scores(structured.data, clean_text)
-            report = ConfidenceService(settings.confidence_strategy).build_report(
-                scores=scores, weights=FIELD_WEIGHTS, critical=CRITICAL_FIELDS
-            )
+            # --- Stages 2-4: structured extraction -> confidence -> validation ---
+            structured, confidence, val_report = reprocessor.run()
 
-            # --- Persist checkpoint: upsert extraction (idempotent) ---
-            existing = db.query(Extraction).filter_by(document_id=doc.id).one_or_none()
-            if existing is None:
-                existing = Extraction(document_id=doc.id)
-                db.add(existing)
-            existing.extraction_method = text_result.method.value
-            existing.model = structured.model
-            existing.data = structured.data
-            existing.parse_error = structured.parse_error
-            existing.overall_confidence = report.overall
-            existing.confidence = report.model_dump()
+            _persist_extraction(
+                db, doc, method=text_result.method.value, structured=structured, confidence=confidence
+            )
+            _persist_validation(db, doc, val_report)
 
             log.info(
                 "pipeline.extracted",
                 document_id=document_id,
                 method=text_result.method.value,
                 parse_error=structured.parse_error,
-                confidence=report.overall,
-                strategy=report.strategy,
+                confidence=confidence["overall"],
+                strategy=confidence["strategy"],
             )
-
-            # --- Stage 4: validation (business correctness, not extraction trust) ---
-            val_ctx = ValidationContext(
-                data=structured.data,
-                source_text=clean_text,
-                document_id=str(doc.id),
-                duplicate_lookup=SqlDuplicateLookup(db),
-                vendor_directory=load_vendor_directory(settings.vendor_directory_path),
-            )
-            val_report = ValidationService(invoice_rule_config()).validate(val_ctx)
-
-            existing_val = db.query(Validation).filter_by(document_id=doc.id).one_or_none()
-            if existing_val is None:
-                existing_val = Validation(document_id=doc.id)
-                db.add(existing_val)
-            existing_val.overall = val_report.overall.value
-            existing_val.report = val_report.model_dump(mode="json")
-
-            doc.status = DocumentStatus.VALIDATED
             log.info(
                 "pipeline.validated",
                 document_id=document_id,
@@ -139,15 +210,84 @@ def process_document(self, document_id: str) -> dict:
                 counts=val_report.counts,
                 failures=[r.rule_id for r in val_report.failures],
             )
+
+            # --- Stage 5: agentic review (only when there is something to review) ---
+            needs_review = (
+                confidence["overall"] < settings.confidence_threshold
+                or val_report.overall is not Severity.PASS
+            )
+            if not needs_review:
+                doc.status = DocumentStatus.COMPLETED
+                log.info("pipeline.completed", document_id=document_id, review="skipped")
+                return {
+                    "status": doc.status.value,
+                    "confidence": confidence["overall"],
+                    "validation": val_report.overall.value,
+                    "review": None,
+                }
+
+            doc.status = DocumentStatus.REVIEW
+            db.flush()
+
+            outcome = ReviewAgent(
+                provider, reprocessor=reprocessor, max_attempts=settings.review_max_attempts
+            ).review(
+                document_id=str(doc.id),
+                data=structured.data,
+                confidence=confidence,
+                validation=val_report,
+            )
+
+            # A retry may have produced a better extraction — persist the latest.
+            if outcome.attempts > 1 and reprocessor.latest is not None:
+                new_structured, new_confidence, new_val = reprocessor.latest
+                _persist_extraction(
+                    db, doc, method=text_result.method.value,
+                    structured=new_structured, confidence=new_confidence,
+                )
+                _persist_validation(db, doc, new_val)
+                log.info(
+                    "pipeline.extraction_updated_after_retry",
+                    document_id=document_id,
+                    confidence=new_confidence["overall"],
+                    validation=new_val.overall.value,
+                )
+
+            rev = db.query(Review).filter_by(document_id=doc.id).one_or_none()
+            if rev is None:
+                rev = Review(document_id=doc.id)
+                db.add(rev)
+            rev.decision = outcome.decision.value
+            rev.reasoning = outcome.reasoning
+            rev.attempts = outcome.attempts
+            rev.overridden = outcome.overridden
+            rev.override_reason = outcome.override_reason
+            rev.history = outcome.history
+
+            doc.status = {
+                ReviewDecision.ACCEPT: DocumentStatus.COMPLETED,
+                ReviewDecision.ESCALATE: DocumentStatus.ESCALATED,
+                ReviewDecision.REJECT: DocumentStatus.REJECTED,
+                ReviewDecision.RETRY: DocumentStatus.ESCALATED,  # unreachable: guarded
+            }[outcome.decision]
+
+            log.info(
+                "pipeline.reviewed",
+                document_id=document_id,
+                decision=outcome.decision.value,
+                overridden=outcome.overridden,
+                override_reason=outcome.override_reason,
+                attempts=outcome.attempts,
+                status=doc.status.value,
+            )
             return {
                 "status": doc.status.value,
-                "confidence": report.overall,
+                "confidence": confidence["overall"],
                 "validation": val_report.overall.value,
-                "parse_error": structured.parse_error,
+                "review": outcome.decision.value,
             }
 
     except SoftTimeLimitExceeded:
-        # Ran out of time — mark FAILED, do not retry into another timeout.
         _mark_failed(document_id, "soft time limit exceeded")
         raise
     except Exception as exc:
@@ -158,7 +298,7 @@ def process_document(self, document_id: str) -> dict:
             attempt=self.request.retries,
         )
         try:
-            raise self.retry(exc=exc)  # bounded retry with backoff
+            raise self.retry(exc=exc)
         except self.MaxRetriesExceededError:
             _mark_failed(document_id, f"max retries exceeded: {exc}")
             return {"status": "failed"}
@@ -170,8 +310,5 @@ def _mark_failed(document_id: str, reason: str) -> None:
         doc = db.get(Document, document_id)
         if doc is not None:
             doc.status = DocumentStatus.FAILED
-            doc.doc_metadata = {
-                **(doc.doc_metadata or {}),
-                "failure_reason": reason,
-            }
+            doc.doc_metadata = {**(doc.doc_metadata or {}), "failure_reason": reason}
     log.error("pipeline.failed", document_id=document_id, reason=reason)

@@ -9,6 +9,7 @@ from app.core.logging import configure_logging
 from app.db.session import engine
 from app.models.extraction import Extraction  # noqa: F401  (registers table)
 from app.models.validation import Validation  # noqa: F401  (registers table)
+from app.models.review import Review  # noqa: F401  (registers table)
 from app.models.document import Base
 
 
