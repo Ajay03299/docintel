@@ -1,5 +1,6 @@
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -93,4 +94,58 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
             "override_reason": rev.override_reason,
             "history": rev.history,
         },
+    }
+
+
+@router.get("/documents/{document_id}/export")
+def export_document(
+    document_id: str,
+    format: str = Query("json", description="Export format id"),
+    include_evidence: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    from app.engines.output.base import ExportContext
+    from app.engines.output.registry import get_exporter, get_exporters
+
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    ext = db.query(Extraction).filter_by(document_id=doc.id).one_or_none()
+    if ext is None:
+        raise HTTPException(409, "Document has no extraction to export yet")
+
+    try:
+        exporter = get_exporter(format)
+    except ValueError:
+        raise HTTPException(400, f"Unknown format {format!r}. Available: {sorted(get_exporters())}")
+
+    val = db.query(Validation).filter_by(document_id=doc.id).one_or_none()
+    rev = db.query(Review).filter_by(document_id=doc.id).one_or_none()
+
+    ctx = ExportContext(
+        document_id=str(doc.id),
+        filename=doc.original_filename,
+        data=ext.data or {},
+        confidence=ext.confidence or {},
+        validation=(val.report if val else {}),
+        review=({"decision": rev.decision, "reasoning": rev.reasoning} if rev else None),
+        options={"include_evidence": include_evidence},
+    )
+    body = exporter.render(ctx)
+    return Response(
+        content=body,
+        media_type=exporter.media_type,
+        headers={"Content-Disposition": f'attachment; filename="{exporter.filename_for(ctx)}"'},
+    )
+
+
+@router.get("/export-formats")
+def list_export_formats():
+    from app.engines.output.registry import get_exporters
+
+    return {
+        "formats": [
+            {"id": fid, "media_type": cls.media_type, "extension": cls.extension}
+            for fid, cls in sorted(get_exporters().items())
+        ]
     }
