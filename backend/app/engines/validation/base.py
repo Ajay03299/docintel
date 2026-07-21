@@ -39,6 +39,7 @@ class ValidationContext:
     duplicate_lookup: DuplicateLookup | None = None
     vendor_directory: VendorDirectory | None = None
     now: datetime | None = None  # injectable clock -> date rules are deterministic
+    injection_flags: list[str] = field(default_factory=list)  # from security scan
 
 
 class ValidationRule(ABC):

@@ -7,6 +7,10 @@ from app.db.session import session_scope
 from app.engines.confidence.service import ConfidenceService
 from app.engines.ingestion.storage import get_storage
 from app.engines.review.agent import ReviewAgent
+from app.engines.security.prompt_injection import (
+    sanitize_document_text,
+    scan_for_injection,
+)
 from app.engines.understanding.extraction import (
     ExtractionService,
     NativeExtractor,
@@ -59,12 +63,14 @@ class InvoiceReprocessor:
         db: Session,
         document_id: str,
         settings: Settings,
+        injection_flags: list[str] | None = None,
     ) -> None:
         self._provider = provider
         self._clean_text = clean_text
         self._db = db
         self._document_id = document_id
         self._settings = settings
+        self._injection_flags = injection_flags or []
         self.latest: tuple[StructuredExtractionResult, dict, ValidationReport] | None = None
 
     def run(self, hint: str | None = None) -> tuple[StructuredExtractionResult, dict, ValidationReport]:
@@ -95,6 +101,7 @@ class InvoiceReprocessor:
                 document_id=self._document_id,
                 duplicate_lookup=SqlDuplicateLookup(self._db),
                 vendor_directory=load_vendor_directory(self._settings.vendor_directory_path),
+                injection_flags=self._injection_flags,
             )
         )
 
@@ -177,6 +184,17 @@ def process_document(self, document_id: str) -> dict:
             # Strip PDF column padding before the LLM sees it: deterministic
             # cleanup removes noise far more cheaply than prompting around it.
             clean_text = normalize_text(text_result.full_text)
+            # Trust boundary: sanitize BEFORE the model sees the text, and scan
+            # for injection patterns to feed downstream confidence/validation.
+            clean_text, sanitize_notes = sanitize_document_text(clean_text)
+            injection_flags = scan_for_injection(clean_text)
+            if injection_flags or sanitize_notes:
+                log.warning(
+                    "security.injection_signals",
+                    document_id=str(doc.id),
+                    injection_flags=injection_flags,
+                    sanitize_notes=sanitize_notes,
+                )
 
             provider = OllamaProvider(settings.ollama_base_url, settings.ollama_model)
             reprocessor = InvoiceReprocessor(
@@ -185,6 +203,7 @@ def process_document(self, document_id: str) -> dict:
                 db=db,
                 document_id=str(doc.id),
                 settings=settings,
+                injection_flags=injection_flags,
             )
 
             # --- Stages 2-4: structured extraction -> confidence -> validation ---
