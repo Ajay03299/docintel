@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     vendor_directory_path: str = "app/plugins/invoice/vendors.txt"
     review_max_attempts: int = 2
 
+    # Comma-separated API keys (env: API_KEYS). Empty = auth disabled (dev).
+    api_keys: str = ""
+    rate_limit_per_minute: int = 60
+
     max_upload_bytes: int = 25 * 1024 * 1024  # 25 MB
 
     ollama_base_url: str = "http://localhost:11434"

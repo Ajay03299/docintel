@@ -3,6 +3,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.tracing import configure_tracing, get_tracer
 from app.db.session import session_scope
 from app.engines.confidence.service import ConfidenceService
 from app.engines.ingestion.storage import get_storage
@@ -43,6 +44,8 @@ from app.schemas.validation import Severity, ValidationReport
 from app.workers.celery_app import celery_app
 
 log = structlog.get_logger()
+configure_tracing()
+_tracer = get_tracer()
 
 
 class InvoiceReprocessor:
@@ -157,7 +160,9 @@ def process_document(self, document_id: str) -> dict:
     log.info("pipeline.start", document_id=document_id, attempt=self.request.retries)
 
     try:
-        with session_scope() as db:
+        with _tracer.start_as_current_span(
+            "process_document", attributes={"document_id": document_id}
+        ), session_scope() as db:
             doc = db.get(Document, document_id)
             if doc is None:
                 log.error("pipeline.doc_missing", document_id=document_id)

@@ -4,6 +4,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.rate_limit import rate_limit
 from app.db.session import get_db
 from app.engines.ingestion.service import (
     FileTooLarge,
@@ -31,6 +32,7 @@ async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     service: IngestionService = Depends(get_ingestion_service),
+    _identity: str = Depends(rate_limit),
 ):
     data = await file.read()
     try:
