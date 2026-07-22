@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from fastapi.middleware.cors import CORSMiddleware
 from app.api.middleware import RequestIDMiddleware
 from app.api.v1.documents import router as documents_router
 from app.core.config import get_settings
@@ -22,6 +23,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DocIntel", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Vite dev server
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(documents_router, prefix="/api/v1")
 

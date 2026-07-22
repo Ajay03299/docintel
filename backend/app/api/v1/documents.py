@@ -151,3 +151,37 @@ def list_export_formats():
             for fid, cls in sorted(get_exporters().items())
         ]
     }
+
+
+@router.get("/documents")
+def list_documents(
+    status: str | None = Query(None, description="Filter by status, e.g. 'escalated'"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Document)
+    if status:
+        try:
+            q = q.filter(Document.status == DocumentStatus(status))
+        except ValueError:
+            raise HTTPException(400, f"Unknown status {status!r}")
+    total = q.count()
+    rows = (
+        q.order_by(Document.created_at.desc()).offset(offset).limit(limit).all()
+    )
+    items = []
+    for d in rows:
+        ext = db.query(Extraction).filter_by(document_id=d.id).one_or_none()
+        val = db.query(Validation).filter_by(document_id=d.id).one_or_none()
+        rev = db.query(Review).filter_by(document_id=d.id).one_or_none()
+        items.append({
+            "document_id": str(d.id),
+            "filename": d.original_filename,
+            "status": d.status.value,
+            "created_at": d.created_at.isoformat(),
+            "overall_confidence": ext.overall_confidence if ext else None,
+            "validation": val.overall if val else None,
+            "review_decision": rev.decision if rev else None,
+        })
+    return {"total": total, "limit": limit, "offset": offset, "items": items}
