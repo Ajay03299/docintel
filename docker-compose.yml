@@ -15,6 +15,61 @@ services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  # One-shot: apply migrations, then exit. api/worker wait for it to finish.
+  migrate:
+    build: ./backend
+    command: ["sh", "-c", "cd /app && alembic upgrade head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://docintel:docintel_dev@postgres:5432/docintel
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: ./backend
+    ports: ["8000:8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://docintel:docintel_dev@postgres:5432/docintel
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      STORAGE_LOCAL_PATH: /data/storage
+    volumes:
+      - storage:/data/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: ./backend
+    command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://docintel:docintel_dev@postgres:5432/docintel
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      STORAGE_LOCAL_PATH: /data/storage
+    volumes:
+      - storage:/data/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
+  storage:
