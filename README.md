@@ -206,8 +206,8 @@ backend/app/
 
 ## Future improvements
 
-- Additional document types (POs, receipts, KYC) — each a plugin folder.
+- Additional document types (POs, receipts, KYC) - each a plugin folder.
 - Additional LLM providers behind the existing `LLMProvider` interface.
 - Learned confidence weights calibrated against human-review outcomes.
 - Sliding-window rate limiting for smoother burst handling.
-- OTLP export to a real collector (Jaeger/Tempo) — a config change.
+- OTLP export to a real collector (Jaeger/Tempo) - a config change.
