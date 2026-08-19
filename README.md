@@ -1,4 +1,4 @@
-# DocIntel — Agentic Document Intelligence Platform
+# DocIntel - Agentic Document Intelligence Platform
 
 DocIntel ingests enterprise documents (invoices today; the architecture is
 plugin-based for any document type), extracts structured data with a local LLM,
@@ -14,20 +14,19 @@ output is checked by deterministic engines that can catch hallucination,
 arithmetic manipulation, and prompt injection, so the system stays correct even
 when the model does not.
 
----
 
 ## What it does (end to end)
 
-1. **Ingest** — a document is uploaded via REST. The API returns `202 Accepted`
+1. **Ingest** - a document is uploaded via REST. The API returns `202 Accepted`
    in milliseconds and processing runs asynchronously in a background worker.
-2. **Understand** — text is extracted deterministically (PyMuPDF for digital
+2. **Understand** - text is extracted deterministically (PyMuPDF for digital
    PDFs, Tesseract OCR only when needed), then a local LLM (Ollama / qwen2.5)
    extracts structured fields constrained to a schema.
-3. **Score confidence** — each field's trustworthiness is computed from
+3. **Score confidence** - each field's trustworthiness is computed from
    deterministic signals (is the value present? is it *grounded* in the source
    text? does the date parse? does the arithmetic reconcile?), aggregated with a
    min-gated strategy so a single bad critical field caps the whole document.
-4. **Validate** — 18 configurable business rules (arithmetic, dates, duplicates,
+4. **Validate** - 18 configurable business rules (arithmetic, dates, duplicates,
    tax, prompt-injection, …) each return PASS / WARNING / FAIL with a suggested fix.
 5. **Review** — if confidence is low or validation fails, a LangGraph agent
    inspects the evidence and decides Accept / Retry / Escalate / Reject, bounded
