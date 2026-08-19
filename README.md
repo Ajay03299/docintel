@@ -28,17 +28,16 @@ when the model does not.
    min-gated strategy so a single bad critical field caps the whole document.
 4. **Validate** - 18 configurable business rules (arithmetic, dates, duplicates,
    tax, prompt-injection, …) each return PASS / WARNING / FAIL with a suggested fix.
-5. **Review** — if confidence is low or validation fails, a LangGraph agent
+5. **Review** - if confidence is low or validation fails, a LangGraph agent
    inspects the evidence and decides Accept / Retry / Escalate / Reject, bounded
    by deterministic guardrails so it can never loop forever.
-6. **Export** — the result is available as JSON, CSV, XML, or XLSX, with an
+6. **Export** - the result is available as JSON, CSV, XML, or XLSX, with an
    optional evidence trail for auditors.
 
 A React dashboard visualizes every stage: upload, a live status list, a document
 detail view with per-field confidence and the full validation/review trail, and
 a review queue of escalated documents.
 
----
 
 ## Architecture
 
@@ -75,7 +74,7 @@ flowchart TB
 ```
 
 **Why this shape:** the LLM call takes 6–40 seconds locally, so processing
-*cannot* run on the request path — it runs in a Celery worker, and the document's
+*cannot* run on the request path - it runs in a Celery worker, and the document's
 status enum doubles as a resumable checkpoint. File bytes live in object storage;
 Postgres holds only queryable metadata and results. Every engine is a plugin
 seam: a new document type, rule, or export format is a new file, not an edit to
@@ -93,7 +92,7 @@ operational complexity for throughput this project never reaches.
 
 **Confidence is verified, not self-reported.** Small local models over-report
 confidence, so field trust is derived from deterministic checks the model cannot
-fake — most importantly *grounding*: a value must appear verbatim in the source
+fake - most importantly *grounding*: a value must appear verbatim in the source
 text, which catches hallucination without a second model call. Aggregation uses a
 **min-gated weighted mean**: weighted overall, but capped by the weakest
 *critical* field, so a missing total tanks the document to 0 while a missing
@@ -102,7 +101,7 @@ geometric mean (punishes trivial fields) for explainability.
 
 **Validation is open/closed by construction.** Rules self-register via a
 decorator and the package autoloads every module, so adding a rule is dropping a
-file in a folder — the engine never grows an `if/elif` chain. A `SKIPPED`
+file in a folder - the engine never grows an `if/elif` chain. A `SKIPPED`
 severity exists because a rule that *couldn't run* must never report PASS.
 
 **The review agent is bounded by construction, not by instruction.** The LLM
@@ -121,8 +120,8 @@ poisoned invoice fooled the model, and the system still escalated it via two
 independent layers.
 
 **Auth fails closed; the rate limiter fails open.** API-key auth (service-to-
-service, not JWT — there are no user identities) rejects on failure. The Redis
-rate limiter, if Redis is unreachable, lets requests through — a guardrail must
+service, not JWT - there are no user identities) rejects on failure. The Redis
+rate limiter, if Redis is unreachable, lets requests through - a guardrail must
 never become the outage it was meant to prevent.
 
 ---
